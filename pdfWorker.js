@@ -18,6 +18,9 @@ async function downloadFile(url, filePath) {
     url,
     responseType: "stream",
     timeout: 20000,
+    headers: {
+      Authorization: `Bearer ${API_KEY}`
+    }
   });
 
   return new Promise((resolve, reject) => {
@@ -55,7 +58,12 @@ async function processJob(job) {
   try {
     await updateJob(job.job_id, { status: "processing" });
 
-    const htmlRes = await axios.get(job.html_url);
+    const htmlRes = await axios.get(job.html_url, {
+      headers: {
+        Authorization: `Bearer ${API_KEY}`
+      }
+    });
+
     const $ = cheerio.load(htmlRes.data);
 
     const imgs = $("img");
@@ -67,10 +75,9 @@ async function processJob(job) {
 
       let fullUrl = src;
 
-      // FIX RELATIVE PATHS
-      if (src.startsWith("/")) {
-        const base = new URL(job.html_url);
-        fullUrl = base.origin + src;
+      // HANDLE RELATIVE PATHS + AUTH FILES
+      if (!src.startsWith("http")) {
+        fullUrl = `${API_BASE}${src}`;
       }
 
       const filePath = path.join(tempDir, `img-${i}.jpg`);
