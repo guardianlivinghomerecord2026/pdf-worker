@@ -41,17 +41,34 @@ async function processJob(job) {
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
 
-    // 👉 LOAD PAGE
     await page.goto(job.html_url, {
-      waitUntil: "domcontentloaded"
+      waitUntil: "networkidle"
     });
 
-    // 👉 FORCE WAIT FOR ALL IMAGES
+    // 🔥 FORCE SCROLL (TRIGGERS LAZY LOAD)
+    await page.evaluate(async () => {
+      await new Promise(resolve => {
+        let totalHeight = 0;
+        const distance = 500;
+
+        const timer = setInterval(() => {
+          window.scrollBy(0, distance);
+          totalHeight += distance;
+
+          if (totalHeight >= document.body.scrollHeight) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 100);
+      });
+    });
+
+    // 🔥 WAIT FOR IMAGES AFTER SCROLL
     await page.evaluate(async () => {
       const imgs = Array.from(document.images);
       await Promise.all(
         imgs.map(img => {
-          if (img.complete) return;
+          if (img.complete && img.naturalHeight !== 0) return;
           return new Promise(resolve => {
             img.onload = img.onerror = resolve;
           });
