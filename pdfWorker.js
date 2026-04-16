@@ -3,7 +3,6 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import axios from "axios";
-import * as cheerio from "cheerio";
 import { chromium } from "playwright";
 
 const app = express();
@@ -39,20 +38,21 @@ async function processJob(job) {
   try {
     await updateJob(job.job_id, { status: "processing" });
 
-    // 🔥 launch browser with auth
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
-    const page = await browser.newPage();
+    const context = await browser.newContext();
 
-    // 🔥 inject auth header into ALL requests (THIS IS THE FIX)
-    await page.route("**/*", (route) => {
-      const headers = {
-        ...route.request().headers(),
-        Authorization: `Bearer ${API_KEY}`
-      };
-      route.continue({ headers });
-    });
+    // 🔥 SET COOKIE AUTH (CRITICAL)
+    await context.addCookies([
+      {
+        name: "auth_token",
+        value: API_KEY,
+        domain: new URL(API_BASE).hostname,
+        path: "/"
+      }
+    ]);
 
-    // load page normally
+    const page = await context.newPage();
+
     await page.goto(job.html_url, {
       waitUntil: "networkidle"
     });
