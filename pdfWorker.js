@@ -13,7 +13,13 @@ const API_BASE = process.env.API_BASE;
 const API_KEY = process.env.API_KEY;
 
 async function downloadFile(url, filePath) {
-  const res = await axios({ method: "GET", url, responseType: "stream" });
+  const res = await axios({
+    method: "GET",
+    url,
+    responseType: "stream",
+    timeout: 20000,
+  });
+
   return new Promise((resolve, reject) => {
     const stream = fs.createWriteStream(filePath);
     res.data.pipe(stream);
@@ -59,10 +65,18 @@ async function processJob(job) {
       const src = $(el).attr("src");
       if (!src || src.startsWith("data:")) return;
 
+      let fullUrl = src;
+
+      // FIX RELATIVE PATHS
+      if (src.startsWith("/")) {
+        const base = new URL(job.html_url);
+        fullUrl = base.origin + src;
+      }
+
       const filePath = path.join(tempDir, `img-${i}.jpg`);
 
       tasks.push(
-        downloadFile(src, filePath).then(() => {
+        downloadFile(fullUrl, filePath).then(() => {
           $(el).attr("src", `file://${filePath}`);
         })
       );
