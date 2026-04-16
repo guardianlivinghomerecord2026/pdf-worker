@@ -11,6 +11,9 @@ app.use(express.json());
 const API_BASE = process.env.API_BASE;
 const API_KEY = process.env.API_KEY;
 
+// 🔥 YOU MUST ADD THIS
+const BASE44_COOKIE = process.env.BASE44_COOKIE;
+
 async function updateJob(id, data) {
   await axios.patch(`${API_BASE}/PdfJob/${id}`, data, {
     headers: { Authorization: `Bearer ${API_KEY}` },
@@ -39,41 +42,24 @@ async function processJob(job) {
     await updateJob(job.job_id, { status: "processing" });
 
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
-    const page = await browser.newPage();
+    const context = await browser.newContext();
+
+    // 🔥 INJECT REAL SESSION COOKIE
+    await context.addCookies([
+      {
+        name: "session",
+        value: BASE44_COOKIE,
+        domain: "base44.app",
+        path: "/",
+        httpOnly: true,
+        secure: true,
+      }
+    ]);
+
+    const page = await context.newPage();
 
     await page.goto(job.html_url, {
       waitUntil: "networkidle"
-    });
-
-    // 🔥 FORCE SCROLL (TRIGGERS LAZY LOAD)
-    await page.evaluate(async () => {
-      await new Promise(resolve => {
-        let totalHeight = 0;
-        const distance = 500;
-
-        const timer = setInterval(() => {
-          window.scrollBy(0, distance);
-          totalHeight += distance;
-
-          if (totalHeight >= document.body.scrollHeight) {
-            clearInterval(timer);
-            resolve();
-          }
-        }, 100);
-      });
-    });
-
-    // 🔥 WAIT FOR IMAGES AFTER SCROLL
-    await page.evaluate(async () => {
-      const imgs = Array.from(document.images);
-      await Promise.all(
-        imgs.map(img => {
-          if (img.complete && img.naturalHeight !== 0) return;
-          return new Promise(resolve => {
-            img.onload = img.onerror = resolve;
-          });
-        })
-      );
     });
 
     const pdfPath = path.join(tempDir, "output.pdf");
