@@ -39,22 +39,24 @@ async function processJob(job) {
     await updateJob(job.job_id, { status: "processing" });
 
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
-    const context = await browser.newContext();
+    const page = await browser.newPage();
 
-    // 🔥 SET COOKIE AUTH (CRITICAL)
-    await context.addCookies([
-      {
-        name: "auth_token",
-        value: API_KEY,
-        domain: new URL(API_BASE).hostname,
-        path: "/"
-      }
-    ]);
-
-    const page = await context.newPage();
-
+    // 👉 LOAD PAGE
     await page.goto(job.html_url, {
-      waitUntil: "networkidle"
+      waitUntil: "domcontentloaded"
+    });
+
+    // 👉 FORCE WAIT FOR ALL IMAGES
+    await page.evaluate(async () => {
+      const imgs = Array.from(document.images);
+      await Promise.all(
+        imgs.map(img => {
+          if (img.complete) return;
+          return new Promise(resolve => {
+            img.onload = img.onerror = resolve;
+          });
+        })
+      );
     });
 
     const pdfPath = path.join(tempDir, "output.pdf");
