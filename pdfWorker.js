@@ -12,25 +12,6 @@ app.use(express.json());
 const API_BASE = process.env.API_BASE;
 const API_KEY = process.env.API_KEY;
 
-async function downloadFile(url, filePath) {
-  const res = await axios({
-    method: "GET",
-    url,
-    responseType: "stream",
-    timeout: 20000,
-    headers: {
-      Authorization: `Bearer ${API_KEY}`
-    }
-  });
-
-  return new Promise((resolve, reject) => {
-    const stream = fs.createWriteStream(filePath);
-    res.data.pipe(stream);
-    stream.on("finish", resolve);
-    stream.on("error", reject);
-  });
-}
-
 async function updateJob(id, data) {
   await axios.patch(`${API_BASE}/PdfJob/${id}`, data, {
     headers: { Authorization: `Bearer ${API_KEY}` },
@@ -58,43 +39,23 @@ async function processJob(job) {
   try {
     await updateJob(job.job_id, { status: "processing" });
 
-    const htmlRes = await axios.get(job.html_url, {
-      headers: {
-        Authorization: `Bearer ${API_KEY}`
-      }
-    });
-
-    const $ = cheerio.load(htmlRes.data);
-
-    const imgs = $("img");
-    const tasks = [];
-
-    imgs.each((i, el) => {
-      const src = $(el).attr("src");
-      if (!src || src.startsWith("data:")) return;
-
-      let fullUrl = src;
-
-      // HANDLE RELATIVE PATHS + AUTH FILES
-      if (!src.startsWith("http")) {
-        fullUrl = `${API_BASE}${src}`;
-      }
-
-      const filePath = path.join(tempDir, `img-${i}.jpg`);
-
-      tasks.push(
-        downloadFile(fullUrl, filePath).then(() => {
-          $(el).attr("src", `file://${filePath}`);
-        })
-      );
-    });
-
-    await Promise.all(tasks);
-
+    // 🔥 launch browser with auth
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
 
-    await page.setContent($.html(), { waitUntil: "load" });
+    // 🔥 inject auth header into ALL requests (THIS IS THE FIX)
+    await page.route("**/*", (route) => {
+      const headers = {
+        ...route.request().headers(),
+        Authorization: `Bearer ${API_KEY}`
+      };
+      route.continue({ headers });
+    });
+
+    // load page normally
+    await page.goto(job.html_url, {
+      waitUntil: "networkidle"
+    });
 
     const pdfPath = path.join(tempDir, "output.pdf");
 
@@ -112,6 +73,7 @@ async function processJob(job) {
       status: "complete",
       pdf_url: pdfUrl,
     });
+
   } catch (err) {
     await updateJob(job.job_id, {
       status: "failed",
