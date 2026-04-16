@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import axios from "axios";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 import { chromium } from "playwright";
 
 const app = express();
