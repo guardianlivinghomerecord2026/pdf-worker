@@ -11,9 +11,6 @@ app.use(express.json());
 const API_BASE = process.env.API_BASE;
 const API_KEY = process.env.API_KEY;
 
-// 🔥 YOU MUST ADD THIS
-const BASE44_COOKIE = process.env.BASE44_COOKIE;
-
 async function updateJob(id, data) {
   await axios.patch(`${API_BASE}/PdfJob/${id}`, data, {
     headers: { Authorization: `Bearer ${API_KEY}` },
@@ -39,39 +36,35 @@ async function processJob(job) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-"));
 
   try {
+    console.log("START JOB:", job.job_id);
+
     await updateJob(job.job_id, { status: "processing" });
 
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
-    const context = await browser.newContext();
+    const page = await browser.newPage();
 
-    // 🔥 INJECT REAL SESSION COOKIE
-    await context.addCookies([
-      {
-        name: "session",
-        value: BASE44_COOKIE,
-        domain: "base44.app",
-        path: "/",
-        httpOnly: true,
-        secure: true,
-      }
-    ]);
-
-    const page = await context.newPage();
-
+    console.log("LOADING HTML...");
     await page.goto(job.html_url, {
-      waitUntil: "networkidle"
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
     });
+
+    console.log("WAITING FOR IMAGES...");
+    await page.waitForTimeout(5000); // give images time
 
     const pdfPath = path.join(tempDir, "output.pdf");
 
+    console.log("GENERATING PDF...");
     await page.pdf({
       path: pdfPath,
       format: "A4",
       printBackground: true,
+      timeout: 60000,
     });
 
     await browser.close();
 
+    console.log("UPLOADING PDF...");
     const pdfUrl = await uploadPdf(pdfPath);
 
     await updateJob(job.job_id, {
@@ -79,7 +72,11 @@ async function processJob(job) {
       pdf_url: pdfUrl,
     });
 
+    console.log("DONE:", job.job_id);
+
   } catch (err) {
+    console.error("ERROR:", err.message);
+
     await updateJob(job.job_id, {
       status: "failed",
       error: err.message,
