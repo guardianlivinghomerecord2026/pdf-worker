@@ -8,32 +8,14 @@ import { chromium } from "playwright";
 const app = express();
 app.use(express.json());
 
-const API_BASE = process.env.API_BASE; // https://yourapp.base44.app
-const API_KEY = process.env.API_KEY;
+const CALLBACK_URL = process.env.BASE44_CALLBACK_URL;
 
-// ✅ CORRECT endpoint + method
-async function updateJob(id, data) {
-  await axios.patch(`${API_BASE}/api/entities/PdfJob/${id}`, data, {
+async function sendUpdate(payload) {
+  await axios.post(CALLBACK_URL, payload, {
     headers: {
-      Authorization: `Bearer ${API_KEY}`,
       "Content-Type": "application/json"
     }
   });
-}
-
-async function uploadPdf(filePath) {
-  const FormData = (await import("form-data")).default;
-  const form = new FormData();
-  form.append("file", fs.createReadStream(filePath));
-
-  const res = await axios.post(`${API_BASE}/api/upload`, form, {
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      ...form.getHeaders(),
-    },
-  });
-
-  return res.data.url;
 }
 
 async function processJob(job) {
@@ -42,7 +24,10 @@ async function processJob(job) {
   try {
     console.log("START JOB:", job.job_id);
 
-    await updateJob(job.job_id, { status: "processing" });
+    await sendUpdate({
+      job_id: job.job_id,
+      status: "processing"
+    });
 
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
@@ -60,7 +45,6 @@ async function processJob(job) {
       content: `
         body { zoom: 0.95; }
         img { max-width: 100%; height: auto; page-break-inside: avoid; }
-        h1, h2, h3, h4 { page-break-after: avoid; }
       `
     });
 
@@ -76,12 +60,29 @@ async function processJob(job) {
 
     await browser.close();
 
-    console.log("UPLOADING PDF...");
-    const pdfUrl = await uploadPdf(pdfPath);
+    console.log("UPLOADING TO BASE44...");
 
-    await updateJob(job.job_id, {
+    const FormData = (await import("form-data")).default;
+    const form = new FormData();
+    form.append("file", fs.createReadStream(pdfPath));
+
+    const uploadRes = await axios.post(
+      `${process.env.API_BASE}/api/upload`,
+      form,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.API_KEY}`,
+          ...form.getHeaders(),
+        },
+      }
+    );
+
+    const pdfUrl = uploadRes.data.url;
+
+    await sendUpdate({
+      job_id: job.job_id,
       status: "complete",
-      pdf_url: pdfUrl,
+      pdf_url: pdfUrl
     });
 
     console.log("DONE:", job.job_id);
@@ -89,9 +90,10 @@ async function processJob(job) {
   } catch (err) {
     console.error("ERROR:", err.message);
 
-    await updateJob(job.job_id, {
+    await sendUpdate({
+      job_id: job.job_id,
       status: "failed",
-      error: err.message,
+      error_message: err.message
     });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
