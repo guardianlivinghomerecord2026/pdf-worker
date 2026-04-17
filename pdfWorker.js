@@ -10,6 +10,14 @@ app.use(express.json());
 
 const CALLBACK_URL = process.env.BASE44_CALLBACK_URL;
 
+const CHROME_PATH = path.join(
+  process.cwd(),
+  "ms-playwright",
+  fs.readdirSync(path.join(process.cwd(), "ms-playwright")).find(d => d.startsWith("chromium")),
+  "chrome-linux",
+  "chrome"
+);
+
 async function sendUpdate(payload) {
   try {
     await axios.post(CALLBACK_URL, payload, {
@@ -31,33 +39,24 @@ async function processJob(job) {
       status: "processing"
     });
 
-    console.log("LAUNCHING BROWSER...");
+    console.log("USING CHROME PATH:", CHROME_PATH);
 
     const browser = await chromium.launch({
+      executablePath: CHROME_PATH,
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
     const page = await browser.newPage();
 
-    console.log("LOADING PAGE...");
     await page.goto(job.html_url, {
       waitUntil: "networkidle",
       timeout: 60000
     });
 
-    console.log("WAITING FOR IMAGES...");
     await page.waitForTimeout(8000);
-
-    await page.addStyleTag({
-      content: `
-        body { zoom: 0.95; }
-        img { max-width: 100%; height: auto; page-break-inside: avoid; }
-      `
-    });
 
     const pdfPath = path.join(tempDir, "output.pdf");
 
-    console.log("GENERATING PDF...");
     await page.pdf({
       path: pdfPath,
       format: "A4",
@@ -65,8 +64,6 @@ async function processJob(job) {
     });
 
     await browser.close();
-
-    console.log("UPLOADING PDF...");
 
     const FormData = (await import("form-data")).default;
     const form = new FormData();
@@ -83,15 +80,11 @@ async function processJob(job) {
       }
     );
 
-    const pdfUrl = uploadRes.data.url;
-
     await sendUpdate({
       job_id: job.job_id,
       status: "complete",
-      pdf_url: pdfUrl
+      pdf_url: uploadRes.data.url
     });
-
-    console.log("DONE:", job.job_id);
 
   } catch (err) {
     console.error("ERROR:", err);
