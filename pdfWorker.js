@@ -8,10 +8,10 @@ import { chromium } from "playwright";
 const app = express();
 app.use(express.json());
 
-const API_BASE = process.env.API_BASE; // should be https://yourapp.base44.app
+const API_BASE = process.env.API_BASE; // https://yourapp.base44.app
 const API_KEY = process.env.API_KEY;
 
-// ✅ FIXED: correct Base44 endpoint + PATCH
+// ✅ CORRECT endpoint + method
 async function updateJob(id, data) {
   await axios.patch(`${API_BASE}/api/entities/PdfJob/${id}`, data, {
     headers: {
@@ -53,13 +53,14 @@ async function processJob(job) {
       timeout: 60000,
     });
 
-    console.log("WAITING...");
+    console.log("WAITING FOR IMAGES...");
     await page.waitForTimeout(8000);
 
     await page.addStyleTag({
       content: `
         body { zoom: 0.95; }
         img { max-width: 100%; height: auto; page-break-inside: avoid; }
+        h1, h2, h3, h4 { page-break-after: avoid; }
       `
     });
 
@@ -75,7 +76,7 @@ async function processJob(job) {
 
     await browser.close();
 
-    console.log("UPLOADING...");
+    console.log("UPLOADING PDF...");
     const pdfUrl = await uploadPdf(pdfPath);
 
     await updateJob(job.job_id, {
@@ -83,7 +84,7 @@ async function processJob(job) {
       pdf_url: pdfUrl,
     });
 
-    console.log("DONE");
+    console.log("DONE:", job.job_id);
 
   } catch (err) {
     console.error("ERROR:", err.message);
