@@ -4,6 +4,7 @@ import path from "path";
 import os from "os";
 import axios from "axios";
 import { chromium } from "playwright";
+import { PDFDocument } from "pdf-lib";
 
 const app = express();
 app.use(express.json());
@@ -37,35 +38,61 @@ async function processJob(job) {
 
   try {
     console.log("START JOB:", job.job_id);
-
     await updateJob(job.job_id, { status: "processing" });
 
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
 
-    console.log("LOADING HTML...");
     await page.goto(job.html_url, {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
 
-    console.log("WAITING FOR IMAGES...");
-    await page.waitForTimeout(5000); // give images time
+    // 👉 WAIT FOR IMAGES
+    await page.waitForTimeout(5000);
 
-    const pdfPath = path.join(tempDir, "output.pdf");
+    // 👉 SPLIT INTO PAGE HEIGHT CHUNKS
+    const totalHeight = await page.evaluate(() => document.body.scrollHeight);
+    const viewportHeight = 1200;
 
-    console.log("GENERATING PDF...");
-    await page.pdf({
-      path: pdfPath,
-      format: "A4",
-      printBackground: true,
-      timeout: 60000,
-    });
+    let pdfPaths = [];
+
+    for (let offset = 0; offset < totalHeight; offset += viewportHeight) {
+      console.log("Rendering chunk at:", offset);
+
+      await page.evaluate((y) => window.scrollTo(0, y), offset);
+      await page.waitForTimeout(1000);
+
+      const pdfPath = path.join(tempDir, `chunk-${offset}.pdf`);
+
+      await page.pdf({
+        path: pdfPath,
+        printBackground: true,
+        width: "800px",
+        height: "1200px",
+        pageRanges: "1",
+      });
+
+      pdfPaths.push(pdfPath);
+    }
 
     await browser.close();
 
-    console.log("UPLOADING PDF...");
-    const pdfUrl = await uploadPdf(pdfPath);
+    // 👉 MERGE PDFs
+    const mergedPdf = await PDFDocument.create();
+
+    for (const file of pdfPaths) {
+      const pdfBytes = fs.readFileSync(file);
+      const pdf = await PDFDocument.load(pdfBytes);
+      const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+      pages.forEach((p) => mergedPdf.addPage(p));
+    }
+
+    const finalPath = path.join(tempDir, "final.pdf");
+    const finalBytes = await mergedPdf.save();
+    fs.writeFileSync(finalPath, finalBytes);
+
+    const pdfUrl = await uploadPdf(finalPath);
 
     await updateJob(job.job_id, {
       status: "complete",
