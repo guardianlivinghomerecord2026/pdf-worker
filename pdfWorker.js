@@ -48,17 +48,16 @@ async function processJob(job) {
       timeout: 60000,
     });
 
-    // 👉 WAIT FOR IMAGES
+    // Give images time to load
     await page.waitForTimeout(5000);
 
-    // 👉 SPLIT INTO PAGE HEIGHT CHUNKS
     const totalHeight = await page.evaluate(() => document.body.scrollHeight);
-    const viewportHeight = 1200;
+    const chunkHeight = 1400;
 
     let pdfPaths = [];
 
-    for (let offset = 0; offset < totalHeight; offset += viewportHeight) {
-      console.log("Rendering chunk at:", offset);
+    for (let offset = 0; offset < totalHeight; offset += chunkHeight) {
+      console.log("Chunk:", offset);
 
       await page.evaluate((y) => window.scrollTo(0, y), offset);
       await page.waitForTimeout(1000);
@@ -67,10 +66,9 @@ async function processJob(job) {
 
       await page.pdf({
         path: pdfPath,
-        printBackground: true,
         width: "800px",
-        height: "1200px",
-        pageRanges: "1",
+        height: "1400px",
+        printBackground: true
       });
 
       pdfPaths.push(pdfPath);
@@ -78,14 +76,14 @@ async function processJob(job) {
 
     await browser.close();
 
-    // 👉 MERGE PDFs
+    // Merge PDFs
     const mergedPdf = await PDFDocument.create();
 
     for (const file of pdfPaths) {
-      const pdfBytes = fs.readFileSync(file);
-      const pdf = await PDFDocument.load(pdfBytes);
+      const bytes = fs.readFileSync(file);
+      const pdf = await PDFDocument.load(bytes);
       const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-      pages.forEach((p) => mergedPdf.addPage(p));
+      pages.forEach(p => mergedPdf.addPage(p));
     }
 
     const finalPath = path.join(tempDir, "final.pdf");
