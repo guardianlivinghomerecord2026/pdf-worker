@@ -11,11 +11,13 @@ app.use(express.json());
 const CALLBACK_URL = process.env.BASE44_CALLBACK_URL;
 
 async function sendUpdate(payload) {
-  await axios.post(CALLBACK_URL, payload, {
-    headers: {
-      "Content-Type": "application/json"
-    }
-  });
+  try {
+    await axios.post(CALLBACK_URL, payload, {
+      headers: { "Content-Type": "application/json" }
+    });
+  } catch (err) {
+    console.error("CALLBACK ERROR:", err.message);
+  }
 }
 
 async function processJob(job) {
@@ -32,8 +34,7 @@ async function processJob(job) {
     console.log("LAUNCHING BROWSER...");
 
     const browser = await chromium.launch({
-      args: ["--no-sandbox"],
-      executablePath: "/opt/render/.cache/ms-playwright/chromium-*/chrome-linux/chrome"
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
     const page = await browser.newPage();
@@ -41,7 +42,7 @@ async function processJob(job) {
     console.log("LOADING PAGE...");
     await page.goto(job.html_url, {
       waitUntil: "networkidle",
-      timeout: 60000,
+      timeout: 60000
     });
 
     console.log("WAITING FOR IMAGES...");
@@ -60,8 +61,7 @@ async function processJob(job) {
     await page.pdf({
       path: pdfPath,
       format: "A4",
-      printBackground: true,
-      timeout: 120000,
+      printBackground: true
     });
 
     await browser.close();
@@ -78,8 +78,8 @@ async function processJob(job) {
       {
         headers: {
           Authorization: `Bearer ${process.env.API_KEY}`,
-          ...form.getHeaders(),
-        },
+          ...form.getHeaders()
+        }
       }
     );
 
@@ -94,13 +94,14 @@ async function processJob(job) {
     console.log("DONE:", job.job_id);
 
   } catch (err) {
-    console.error("ERROR:", err.message);
+    console.error("ERROR:", err);
 
     await sendUpdate({
       job_id: job.job_id,
       status: "failed",
       error_message: err.message
     });
+
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
