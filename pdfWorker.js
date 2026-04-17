@@ -29,7 +29,13 @@ async function processJob(job) {
       status: "processing"
     });
 
-    const browser = await chromium.launch({ args: ["--no-sandbox"] });
+    console.log("LAUNCHING BROWSER...");
+
+    const browser = await chromium.launch({
+      args: ["--no-sandbox"],
+      executablePath: "/opt/render/.cache/ms-playwright/chromium-*/chrome-linux/chrome"
+    });
+
     const page = await browser.newPage();
 
     console.log("LOADING PAGE...");
@@ -60,7 +66,7 @@ async function processJob(job) {
 
     await browser.close();
 
-    console.log("UPLOADING TO BASE44...");
+    console.log("UPLOADING PDF...");
 
     const FormData = (await import("form-data")).default;
     const form = new FormData();
