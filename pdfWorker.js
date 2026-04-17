@@ -8,12 +8,12 @@ import { chromium } from "playwright";
 const app = express();
 app.use(express.json());
 
-const API_BASE = process.env.API_BASE;
+const API_BASE = process.env.API_BASE; // should be https://yourapp.base44.app
 const API_KEY = process.env.API_KEY;
 
-// ✅ FIXED: use POST instead of PATCH (prevents 405)
+// ✅ FIXED: correct Base44 endpoint + PATCH
 async function updateJob(id, data) {
-  await axios.post(`${API_BASE}/PdfJob/${id}`, data, {
+  await axios.patch(`${API_BASE}/api/entities/PdfJob/${id}`, data, {
     headers: {
       Authorization: `Bearer ${API_KEY}`,
       "Content-Type": "application/json"
@@ -26,7 +26,7 @@ async function uploadPdf(filePath) {
   const form = new FormData();
   form.append("file", fs.createReadStream(filePath));
 
-  const res = await axios.post(`${API_BASE}/upload`, form, {
+  const res = await axios.post(`${API_BASE}/api/upload`, form, {
     headers: {
       Authorization: `Bearer ${API_KEY}`,
       ...form.getHeaders(),
@@ -42,7 +42,6 @@ async function processJob(job) {
   try {
     console.log("START JOB:", job.job_id);
 
-    // update to processing
     await updateJob(job.job_id, { status: "processing" });
 
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
@@ -54,16 +53,13 @@ async function processJob(job) {
       timeout: 60000,
     });
 
-    console.log("WAITING FOR IMAGES...");
+    console.log("WAITING...");
     await page.waitForTimeout(8000);
 
-    // safer PDF styling
     await page.addStyleTag({
       content: `
         body { zoom: 0.95; }
         img { max-width: 100%; height: auto; page-break-inside: avoid; }
-        h1, h2, h3, h4 { page-break-after: avoid; }
-        .section, .page-break { page-break-before: always; }
       `
     });
 
@@ -79,16 +75,15 @@ async function processJob(job) {
 
     await browser.close();
 
-    console.log("UPLOADING PDF...");
+    console.log("UPLOADING...");
     const pdfUrl = await uploadPdf(pdfPath);
 
-    // update to complete
     await updateJob(job.job_id, {
       status: "complete",
       pdf_url: pdfUrl,
     });
 
-    console.log("DONE:", job.job_id);
+    console.log("DONE");
 
   } catch (err) {
     console.error("ERROR:", err.message);
