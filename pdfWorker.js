@@ -10,14 +10,6 @@ app.use(express.json());
 
 const CALLBACK_URL = process.env.BASE44_CALLBACK_URL;
 
-const CHROME_PATH = path.join(
-  process.cwd(),
-  "ms-playwright",
-  fs.readdirSync(path.join(process.cwd(), "ms-playwright")).find(d => d.startsWith("chromium")),
-  "chrome-linux",
-  "chrome"
-);
-
 async function sendUpdate(payload) {
   try {
     await axios.post(CALLBACK_URL, payload, {
@@ -39,10 +31,8 @@ async function processJob(job) {
       status: "processing"
     });
 
-    console.log("USING CHROME PATH:", CHROME_PATH);
-
+    // ✅ CLEAN DOCKER LAUNCH — NO CUSTOM PATHS
     const browser = await chromium.launch({
-      executablePath: CHROME_PATH,
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
