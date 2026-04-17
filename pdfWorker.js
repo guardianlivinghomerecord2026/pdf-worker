@@ -4,7 +4,6 @@ import path from "path";
 import os from "os";
 import axios from "axios";
 import { chromium } from "playwright";
-import { PDFDocument } from "pdf-lib";
 
 const app = express();
 app.use(express.json());
@@ -12,9 +11,13 @@ app.use(express.json());
 const API_BASE = process.env.API_BASE;
 const API_KEY = process.env.API_KEY;
 
+// ✅ FIXED: use POST instead of PATCH (prevents 405)
 async function updateJob(id, data) {
-  await axios.patch(`${API_BASE}/PdfJob/${id}`, data, {
-    headers: { Authorization: `Bearer ${API_KEY}` },
+  await axios.post(`${API_BASE}/PdfJob/${id}`, data, {
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json"
+    }
   });
 }
 
@@ -38,60 +41,48 @@ async function processJob(job) {
 
   try {
     console.log("START JOB:", job.job_id);
+
+    // update to processing
     await updateJob(job.job_id, { status: "processing" });
 
     const browser = await chromium.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
 
+    console.log("LOADING PAGE...");
     await page.goto(job.html_url, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "networkidle",
       timeout: 60000,
     });
 
-    // Give images time to load
-    await page.waitForTimeout(5000);
+    console.log("WAITING FOR IMAGES...");
+    await page.waitForTimeout(8000);
 
-    const totalHeight = await page.evaluate(() => document.body.scrollHeight);
-    const chunkHeight = 1400;
+    // safer PDF styling
+    await page.addStyleTag({
+      content: `
+        body { zoom: 0.95; }
+        img { max-width: 100%; height: auto; page-break-inside: avoid; }
+        h1, h2, h3, h4 { page-break-after: avoid; }
+        .section, .page-break { page-break-before: always; }
+      `
+    });
 
-    let pdfPaths = [];
+    const pdfPath = path.join(tempDir, "output.pdf");
 
-    for (let offset = 0; offset < totalHeight; offset += chunkHeight) {
-      console.log("Chunk:", offset);
-
-      await page.evaluate((y) => window.scrollTo(0, y), offset);
-      await page.waitForTimeout(1000);
-
-      const pdfPath = path.join(tempDir, `chunk-${offset}.pdf`);
-
-      await page.pdf({
-        path: pdfPath,
-        width: "800px",
-        height: "1400px",
-        printBackground: true
-      });
-
-      pdfPaths.push(pdfPath);
-    }
+    console.log("GENERATING PDF...");
+    await page.pdf({
+      path: pdfPath,
+      format: "A4",
+      printBackground: true,
+      timeout: 120000,
+    });
 
     await browser.close();
 
-    // Merge PDFs
-    const mergedPdf = await PDFDocument.create();
+    console.log("UPLOADING PDF...");
+    const pdfUrl = await uploadPdf(pdfPath);
 
-    for (const file of pdfPaths) {
-      const bytes = fs.readFileSync(file);
-      const pdf = await PDFDocument.load(bytes);
-      const pages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-      pages.forEach(p => mergedPdf.addPage(p));
-    }
-
-    const finalPath = path.join(tempDir, "final.pdf");
-    const finalBytes = await mergedPdf.save();
-    fs.writeFileSync(finalPath, finalBytes);
-
-    const pdfUrl = await uploadPdf(finalPath);
-
+    // update to complete
     await updateJob(job.job_id, {
       status: "complete",
       pdf_url: pdfUrl,
